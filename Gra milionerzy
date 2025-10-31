@@ -1,0 +1,336 @@
+
+import * as readline from "node:readline/promises";
+import { stdin as input, stdout as output } from "node:process";
+
+// ------------------------- KONFIGURACJA -------------------------
+const WYPLATY = [
+    500,
+    1000, // próg 1
+    2000,
+    5000,
+    10000,
+    20000,
+    40000, // próg 2
+    75000,
+    125000,
+    250000,
+    500000,
+    1000000,
+] as const;
+
+const PROG1 = 1000;
+const PROG2 = 40000;
+
+const LITERY = ["A", "B", "C", "D"] as const;
+type Litera = (typeof LITERY)[number];
+
+interface Pytanie {
+    pytanie: string;
+    odpowiedzi: [string, string, string, string];
+    poprawna: Litera;
+    poziom: number; // 1..12
+}
+
+const PYTANIA: Pytanie[] = [
+    // Poziom 1 (łatwe)
+    { pytanie: "Jak nazywa się stolica Polski?", odpowiedzi: ["Warszawa", "Kraków", "Gdańsk", "Wrocław"], poprawna: "A", poziom: 1 },
+    { pytanie: "Ile dni ma tydzień?", odpowiedzi: ["5", "6", "7", "8"], poprawna: "C", poziom: 1 },
+    { pytanie: "Jakiego koloru jest trawa latem?", odpowiedzi: ["Niebieska", "Zielona", "Czerwona", "Fioletowa"], poprawna: "B", poziom: 1 },
+    // Poziom 2
+    { pytanie: "Który z tych napojów zawiera kofeinę?", odpowiedzi: ["Woda", "Herbata", "Sok jabłkowy", "Kompot"], poprawna: "B", poziom: 2 },
+    { pytanie: "Ile to 2 + 2?", odpowiedzi: ["3", "4", "5", "6"], poprawna: "B", poziom: 2 },
+    { pytanie: "Jak ma na imię Kopciuszek w baśni?", odpowiedzi: ["Cinderella", "Bella", "Ariel", "Jasmine"], poprawna: "A", poziom: 2 },
+    // Poziom 3
+    { pytanie: "Który pierwiastek chemiczny ma symbol O?", odpowiedzi: ["Złoto", "Tlen", "Srebro", "Cyna"], poprawna: "B", poziom: 3 },
+    { pytanie: "Jak nazywa się największy ocean na Ziemi?", odpowiedzi: ["Atlantycki", "Indyjski", "Spokojny (Pacyfik)", "Arktyczny"], poprawna: "C", poziom: 3 },
+    { pytanie: "W którym kraju leży Piza ze słynną wieżą?", odpowiedzi: ["Hiszpania", "Włochy", "Francja", "Portugalia"], poprawna: "B", poziom: 3 },
+    // Poziom 4
+    { pytanie: "Ile wynosi liczba π z dokładnością do dwóch miejsc po przecinku?", odpowiedzi: ["3,12", "3,14", "3,16", "3,18"], poprawna: "B", poziom: 4 },
+    { pytanie: "Który kontynent jest najmniejszy powierzchniowo?", odpowiedzi: ["Australia", "Europa", "Antarktyda", "Ameryka Południowa"], poprawna: "A", poziom: 4 },
+    { pytanie: "Kto jest autorem 'Pana Tadeusza'?", odpowiedzi: ["Juliusz Słowacki", "Bolesław Prus", "Adam Mickiewicz", "Henryk Sienkiewicz"], poprawna: "C", poziom: 4 },
+    // Poziom 5
+    { pytanie: "Ile godzin ma doba?", odpowiedzi: ["12", "24", "36", "48"], poprawna: "B", poziom: 5 },
+    { pytanie: "Jak nazywa się najwyższy szczyt świata?", odpowiedzi: ["K2", "Mount Everest", "Kilimandżaro", "Mont Blanc"], poprawna: "B", poziom: 5 },
+    { pytanie: "W jakim mieście gra klub piłkarski FC Barcelona?", odpowiedzi: ["Madryt", "Valencia", "Barcelona", "Sewilla"], poprawna: "C", poziom: 5 },
+    // Poziom 6
+    { pytanie: "Który instrument ma klapy i stroik?", odpowiedzi: ["Klarnet", "Fortepian", "Skrzypce", "Bęben"], poprawna: "A", poziom: 6 },
+    { pytanie: "Który gaz dominuje w atmosferze Ziemi?", odpowiedzi: ["Tlen", "Dwutlenek węgla", "Azot", "Argon"], poprawna: "C", poziom: 6 },
+    { pytanie: "W jakim języku napisano 'Don Kichota'?", odpowiedzi: ["Po włosku", "Po hiszpańsku", "Po francusku", "Po portugalsku"], poprawna: "B", poziom: 6 },
+    // Poziom 7
+    { pytanie: "Które miasto leży nad Wełtawą?", odpowiedzi: ["Praga", "Wiedeń", "Budapeszt", "Bratysława"], poprawna: "A", poziom: 7 },
+    { pytanie: "Który z wymienionych to pierwiastek szlachetny?", odpowiedzi: ["Krypton", "Wapń", "Żelazo", "Miedź"], poprawna: "A", poziom: 7 },
+    { pytanie: "Kto namalował 'Gwiaździstą noc'?", odpowiedzi: ["Claude Monet", "Vincent van Gogh", "Pablo Picasso", "Edvard Munch"], poprawna: "B", poziom: 7 },
+    // Poziom 8
+    { pytanie: "Jak nazywa się proces przejścia cieczy w gaz?", odpowiedzi: ["Sublimacja", "Parowanie", "Skraplanie", "Resublimacja"], poprawna: "B", poziom: 8 },
+    { pytanie: "Który pisarz stworzył Sherlocka Holmesa?", odpowiedzi: ["Agatha Christie", "Arthur Conan Doyle", "Edgar Allan Poe", "J.K. Rowling"], poprawna: "B", poziom: 8 },
+    { pytanie: "Które państwo nie graniczy z Polską?", odpowiedzi: ["Litwa", "Białoruś", "Słowacja", "Węgry"], poprawna: "D", poziom: 8 },
+    // Poziom 9
+    { pytanie: "W którym roku upadł Mur Berliński?", odpowiedzi: ["1987", "1989", "1991", "1993"], poprawna: "B", poziom: 9 },
+    { pytanie: "Który organ wytwarza insulinę?", odpowiedzi: ["Wątroba", "Trzustka", "Śledziona", "Tarczyca"], poprawna: "B", poziom: 9 },
+    { pytanie: "Która planeta jest najbliżej Słońca?", odpowiedzi: ["Wenus", "Ziemia", "Merkury", "Mars"], poprawna: "C", poziom: 9 },
+    // Poziom 10
+    { pytanie: "Jak nazywa się stolica Kanady?", odpowiedzi: ["Toronto", "Montreal", "Ottawa", "Vancouver"], poprawna: "C", poziom: 10 },
+    { pytanie: "Który język ma najwięcej native speakerów?", odpowiedzi: ["Angielski", "Hiszpański", "Mandaryński", "Hindustani"], poprawna: "C", poziom: 10 },
+    { pytanie: "Który kompozytor był głuchy pod koniec życia?", odpowiedzi: ["Mozart", "Beethoven", "Bach", "Chopin"], poprawna: "B", poziom: 10 },
+    // Poziom 11
+    { pytanie: "Jak nazywa się największy księżyc Saturna?", odpowiedzi: ["Europa", "Ganimedes", "Tytan", "Kallisto"], poprawna: "C", poziom: 11 },
+    { pytanie: "Twierdzenie Pitagorasa dotyczy jakich trójkątów?", odpowiedzi: ["Równobocznych", "Równoramiennych", "Prostokątnych", "Dowolnych"], poprawna: "C", poziom: 11 },
+    { pytanie: "Który z tych języków NIE jest językiem urzędowym Szwajcarii?", odpowiedzi: ["Romansz", "Włoski", "Francuski", "Hiszpański"], poprawna: "D", poziom: 11 },
+    // Poziom 12
+    { pytanie: "Który noblista napisał 'Historię i świadomość klasową'?", odpowiedzi: ["Karl Popper", "György Lukács", "Friedrich Hayek", "Bertrand Russell"], poprawna: "B", poziom: 12 },
+    { pytanie: "Który polski król jako pierwszy koronował się na Wawelu?", odpowiedzi: ["Władysław Łokietek", "Kazimierz Wielki", "Bolesław Chrobry", "Zygmunt Stary"], poprawna: "A", poziom: 12 },
+    { pytanie: "W fizyce: stała Plancka ma wymiar...", odpowiedzi: ["E·t", "p·l", "m·a", "q·V"], poprawna: "A", poziom: 12 },
+];
+
+
+function shuffle<T>(arr: T[]): T[] {
+    for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+}
+
+function pln(n: number): string {
+    return new Intl.NumberFormat("pl-PL").format(n) + " zł";
+}
+
+function wrap(text: string, width = 60): string {
+    const words = text.split(/\s+/);
+    const lines: string[] = [];
+    let line = "";
+    for (const w of words) {
+        if ((line + " " + w).trim().length > width) {
+            lines.push(line.trim());
+            line = w;
+        } else {
+            line += " " + w;
+        }
+    }
+    if (line.trim()) lines.push(line.trim());
+    return lines.join("\n");
+}
+
+// ------------------------- LOGIKA GRY -------------------------
+class KolaRatunkowe {
+    uzyte = { "5050": false, publicznosc: false, telefon: false, zmiana: false };
+    dostepne(): (keyof KolaRatunkowe["uzyte"])[] {
+        return Object.entries(this.uzyte).filter(([, v]) => !v).map(([k]) => k as any);
+    }
+}
+
+function opiszKola(kola: KolaRatunkowe): string {
+    const nazwy: Record<keyof KolaRatunkowe["uzyte"], string> = {
+        "5050": "50:50",
+        publicznosc: "Pytanie do publiczności",
+        telefon: "Telefon do przyjaciela",
+        zmiana: "Zmiana pytania",
+    };
+    const parts: string[] = [];
+    for (const klucz of ["5050", "publicznosc", "telefon", "zmiana"] as const) {
+        const status = kola.uzyte[klucz] ? "(użyte)" : "";
+        parts.push(`- ${nazwy[klucz]} ${status}`.trim());
+    }
+    return parts.join("\n");
+}
+
+function formatPytanie(q: Pytanie, dostepneLitery: Litera[] = [...LITERY]): string {
+    const lines: string[] = [];
+    lines.push("\n" + "=".repeat(60));
+    lines.push(wrap(q.pytanie));
+    lines.push("-");
+    q.odpowiedzi.forEach((odp, i) => {
+        const lit = LITERY[i];
+        if (dostepneLitery.includes(lit)) lines.push(` ${lit}) ${odp}`);
+        else lines.push(` ${lit}) ——`);
+    });
+    return lines.join("\n");
+}
+
+function grupujIPobierzWybor(): Pytanie[] {
+    const byLevel = new Map<number, Pytanie[]>();
+    for (const p of PYTANIA) {
+        const arr = byLevel.get(p.poziom) ?? [];
+        arr.push(p);
+        byLevel.set(p.poziom, arr);
+    }
+    const wybrane: Pytanie[] = [];
+    for (let poziom = 1; poziom <= 12; poziom++) {
+        const kandydaci = byLevel.get(poziom) ?? [];
+        if (kandydaci.length < 1) {
+            console.error(`Brak pytań dla poziomu ${poziom}! Uzupełnij PYTANIA.`);
+            process.exit(1);
+        }
+        shuffle(kandydaci);
+        wybrane.push(...kandydaci.slice(0, Math.min(2, kandydaci.length))); // główne + rezerwowe
+    }
+    // Wymieszaj w obrębie całości i potem posortuj po poziomie, aby utrzymać rosnący poziom
+    shuffle(wybrane);
+    wybrane.sort((a, b) => a.poziom - b.poziom);
+    return wybrane;
+}
+
+function zastosuj5050(q: Pytanie): Litera[] {
+    const poprawna = q.poprawna;
+    const pozostale = LITERY.filter((l) => l !== poprawna);
+    const losowaBledna = pozostale[Math.floor(Math.random() * pozostale.length)];
+    return [...[poprawna, losowaBledna]].sort() as Litera[];
+}
+
+function publicznoscSugestia(q: Pytanie): Record<Litera, number> {
+    const poziom = q.poziom;
+    const base = Math.max(55 - poziom * 2, 35); // procent dla poprawnej
+    const pozostaleSum = 100 - base;
+    const rozklad = [0, 0, 0, 0];
+    const idxPop = LITERY.indexOf(q.poprawna);
+    rozklad[idxPop] = base;
+    const resIdx = [0, 1, 2, 3].filter((i) => i !== idxPop);
+    const a = randInt(10, Math.min(50, pozostaleSum));
+    const b = randInt(0, pozostaleSum - a);
+    const c = pozostaleSum - a - b;
+    shuffle(resIdx);
+    for (const [perc, i] of [a, b, c].map((v, k) => [v, resIdx[k]] as const)) {
+        rozklad[i] = perc;
+    }
+    const out: Record<Litera, number> = { A: 0, B: 0, C: 0, D: 0 } as any;
+    LITERY.forEach((lit, i) => (out[lit] = rozklad[i]));
+    return out;
+}
+
+function telefonSugestia(q: Pytanie): Litera {
+    if (Math.random() < 0.7) return q.poprawna;
+    const bledne = LITERY.filter((l) => l !== q.poprawna);
+    return bledne[Math.floor(Math.random() * bledne.length)];
+}
+
+function znajdzRezerwowePytanie(pytania: Pytanie[], poziom: number, aktualnyIdx: number): [number, Pytanie] | null {
+    for (let i = 0; i < pytania.length; i++) {
+        if (i !== aktualnyIdx && pytania[i].poziom === poziom) return [i, pytania[i]];
+    }
+    return null;
+}
+
+function randInt(min: number, max: number): number {
+    // inclusive min, inclusive max
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+async function promptLine(rl: readline.Interface, q: string): Promise<string> {
+    const ans = await rl.question(q);
+    return ans.trim();
+}
+
+async function gra(): Promise<void> {
+    const rl = readline.createInterface({ input, output });
+    try {
+        console.log("\nWitaj w grze MILIONERZY!\n");
+        const imie = (await promptLine(rl, "Podaj swoje imię: ")).trim() || "Gracz";
+
+        const pytania = grupujIPobierzWybor();
+        const kola = new KolaRatunkowe();
+
+        let wygrana = 0;
+        let globalIdx = 0; // indeks przesuwany do przodu, by nie powtarzać pytań
+        let poziomDocelowy = 1;
+
+        while (poziomDocelowy <= 12) {
+            
+            let idx = -1;
+            for (let j = globalIdx; j < pytania.length; j++) {
+                if (pytania[j].poziom === poziomDocelowy) { idx = j; break; }
+            }
+            if (idx === -1) {
+                console.log(`Brak pytań dla poziomu ${poziomDocelowy}. Kończymy grę.`);
+                break;
+            }
+            let q = pytania[idx];
+            let dostepneLitery: Litera[] = [...LITERY];
+
+            // pętla obsługująca koła / odpowiedzi dla bieżącego pytania
+            for (;;) {
+                console.log(formatPytanie(q, dostepneLitery));
+                console.log("\nWpisz A/B/C/D, 'K' aby użyć koła ratunkowego, 'R' aby zrezygnować.");
+                console.log("Koła ratunkowe:\n" + opiszKola(kola));
+                const wybor = (await promptLine(rl, ">> ")).toUpperCase();
+
+                if (wybor === "R") {
+                    console.log(`\n${imie}, rezygnujesz i zabierasz ${pln(wygrana)}. Gratulacje!`);
+                    return;
+                }
+
+                if (wybor === "K") {
+                    if (kola.dostepne().length === 0) { console.log("Brak dostępnych kół ratunkowych!"); continue; }
+                    console.log("\nWybierz koło: 1) 50:50 2) Publiczność 3) Telefon 4) Zmiana pytania");
+                    const k = await promptLine(rl, "Numer koła: ");
+                    if (k === "1" && !kola.uzyte["5050"]) {
+                        dostepneLitery = zastosuj5050(q);
+                        kola.uzyte["5050"] = true;
+                        console.log("\nZastosowano 50:50. Pozostały dwie odpowiedzi.");
+                        continue;
+                    } else if (k === "2" && !kola.uzyte.publicznosc) {
+                        kola.uzyte.publicznosc = true;
+                        const rozklad = publicznoscSugestia(q);
+                        console.log("\nGłosowanie publiczności:");
+                        for (const lit of LITERY) {
+                            console.log(` ${lit}: ${rozklad[lit]}%`);
+                        }
+                        continue;
+                    } else if (k === "3" && !kola.uzyte.telefon) {
+                        kola.uzyte.telefon = true;
+                        const sug = telefonSugestia(q);
+                        console.log(`\nPrzyjaciel mówi: 'Wydaje mi się, że to ${sug}.'`);
+                        continue;
+                    } else if (k === "4" && !kola.uzyte.zmiana) {
+                        const res = znajdzRezerwowePytanie(pytania, q.poziom, idx);
+                        if (!res) { console.log("Brak rezerwowego pytania na tym poziomie – nie można użyć zmiany."); continue; }
+                        const [noweIdx, noweQ] = res;
+                        [pytania[idx], pytania[noweIdx]] = [pytania[noweIdx], pytania[idx]]; // zamiana miejscami
+                        q = pytania[idx];
+                        kola.uzyte.zmiana = true;
+                        dostepneLitery = [...LITERY];
+                        console.log("\nZmieniono pytanie!");
+                        continue;
+                    } else {
+                        console.log("Nieprawidłowy wybór lub koło już użyte.");
+                        continue;
+                    }
+                }
+
+                if (LITERY.includes(wybor as any)) {
+                    const lit = wybor as Litera;
+                    if (!dostepneLitery.includes(lit)) {
+                        console.log("Ta odpowiedź została usunięta przez 50:50.");
+                        continue;
+                    }
+                    if (lit === q.poprawna) {
+                        wygrana = WYPLATY[poziomDocelowy - 1];
+                        console.log(`\nPoprawna odpowiedź! Wygrywasz ${pln(wygrana)}.`);
+                        if (wygrana === PROG1) console.log("(Osiągnięto próg gwarantowany 1 000 zł)");
+                        if (wygrana === PROG2) console.log("(Osiągnięto próg gwarantowany 40 000 zł)");
+                        poziomDocelowy += 1;
+                        globalIdx = idx + 1;
+                        break; // następne pytanie
+                    } else {
+                        const gwarant = wygrana >= PROG2 ? PROG2 : wygrana >= PROG1 ? PROG1 : 0;
+                        console.log(`\nNiestety, to błędna odpowiedź. Twoja wygrana gwarantowana: ${pln(gwarant)}.`);
+                        return;
+                    }
+                } else {
+                    console.log("Wpisz A/B/C/D, K lub R.");
+                }
+            }
+        }
+
+        console.log(`\n${imie}, BRAWO! Zostajesz MILIONEREM i zdobywasz ${pln(1000000)}!`);
+    } finally {
+        rl.close();
+    }
+}
+
+// ------------------------- START -------------------------
+if (import.meta.url === `file://${process.argv[1]}`) {
+    gra().catch((err) => {
+        if (err && (err as any).name === "AbortError") return;
+        console.error(err);
+    });
+}
