@@ -2,7 +2,6 @@
 import * as readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 
-// ------------------------- KONFIGURACJA -------------------------
 const WYPLATY = [
     500,
     1000, // próg 1
@@ -111,7 +110,7 @@ function wrap(text: string, width = 60): string {
     return lines.join("\n");
 }
 
-// ------------------------- LOGIKA GRY -------------------------
+
 class KolaRatunkowe {
     uzyte = { "5050": false, publicznosc: false, telefon: false, zmiana: false };
     dostepne(): (keyof KolaRatunkowe["uzyte"])[] {
@@ -327,7 +326,7 @@ async function gra(): Promise<void> {
     }
 }
 
-// ------------------------- START -------------------------
+
 if (import.meta.url === `file://${process.argv[1]}`) {
     gra().catch((err) => {
         if (err && (err as any).name === "AbortError") return;
