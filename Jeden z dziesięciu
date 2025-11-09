@@ -1,0 +1,486 @@
+// jeden-z-dziesieciu.ts
+import * as readline from "node:readline/promises";
+import { stdin as input, stdout as output } from "node:process";
+
+/** ========= Typy i narzędzia ========= */
+type QA = {
+    pytanie: string;
+    odpowiedzi?: [string, string, string, string]; // jeśli podane, poprawna to litera A-D
+    poprawna: string; // litera (A-D) albo fraza przy pytaniu otwartym
+};
+type Player = {
+    seat: number;
+    name: string;
+    lives: number;  // używane w Etap 2 i 3 (3 życia)
+    score: number;  // punkty tylko w Etap 3
+    alive: boolean;
+    e3_correctA: number; // liczn. poprawnych w części A finału
+};
+
+const LITERY = ["A", "B", "C", "D"] as const;
+type Litera = typeof LITERY[number];
+
+function shuffle<T>(arr: T[]): T[] {
+    for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+}
+function normalizeAnswer(s: string): string {
+    return s.trim().toLowerCase().replace(/\s+/g, " ");
+}
+function wrap(text: string, width = 72): string {
+    const words = text.split(/\s+/);
+    const lines: string[] = [];
+    let line = "";
+    for (const w of words) {
+        if ((line + " " + w).trim().length > width) {
+            lines.push(line.trim());
+            line = w;
+        } else line += " " + w;
+    }
+    if (line.trim()) lines.push(line.trim());
+    return lines.join("\n");
+}
+async function promptLine(rl: readline.Interface, q: string): Promise<string> {
+    return (await rl.question(q)).trim();
+}
+function hr(title?: string) {
+    console.log("\n" + "=".repeat(72));
+    if (title) console.log(title);
+    console.log("=".repeat(72) + "\n");
+}
+function showLives(p: Player) {
+    return "❤".repeat(p.lives) + "·".repeat(Math.max(0, 3 - p.lives));
+}
+function pause(ms = 250) { return new Promise(res => setTimeout(res, ms)); }
+
+/** ========= Baza pytań (przykładowa) ========= */
+const PYTANIA: QA[] = [
+    // otwarte
+    { pytanie: "Stolica Polski to…", poprawna: "warszawa" },
+    { pytanie: "Ile jest kontynentów na Ziemi (liczbowo)?", poprawna: "7" },
+    { pytanie: "Najdłuższa rzeka w Polsce to…", poprawna: "wisła" },
+    { pytanie: "Chemiczny symbol sodu to…", poprawna: "na" },
+    { pytanie: "W którym mieście jest wieża Eiffla?", poprawna: "paryż" },
+    { pytanie: "Ile minut ma godzina?", poprawna: "60" },
+    { pytanie: "Autor 'Pana Tadeusza' to…", poprawna: "adam mickiewicz" },
+    { pytanie: "Język urzędowy w Brazylii to…", poprawna: "portugalski" },
+    { pytanie: "Najbliższa Słońcu planeta to…", poprawna: "merkury" },
+    { pytanie: "Stolicą Kanady jest…", poprawna: "ottawa" },
+    { pytanie: "Stolica Włoch to…", poprawna: "rzym" },
+    { pytanie: "Waluta Japonii to…", poprawna: "jen" },
+    { pytanie: "Które miasto leży nad Wełtawą? (po polsku)", poprawna: "praga" },
+    { pytanie: "Największy kontynent to…", poprawna: "azja" },
+    { pytanie: "Rzeka w Paryżu to…", poprawna: "sekwana" },
+    { pytanie: "Na którym kontynencie leży Egipt (głównie)?", poprawna: "afryka" },
+    { pytanie: "Stolica Niemiec to…", poprawna: "berlin" },
+    { pytanie: "Państwo wyspiarskie ze stolicą Tokio: …", poprawna: "japonia" },
+    { pytanie: "Państwo z flagą z liściem klonu: …", poprawna: "kanada" },
+    { pytanie: "Największy ssak morski to…", poprawna: "płetwal błękitny" },
+
+    // wariantowe
+    {
+        pytanie: "Który ocean jest największy?",
+        odpowiedzi: ["Atlantycki", "Spokojny (Pacyfik)", "Indyjski", "Arktyczny"],
+        poprawna: "B",
+    },
+    {
+        pytanie: "Który pierwiastek ma symbol O?",
+        odpowiedzi: ["Złoto", "Cyna", "Tlen", "Srebro"],
+        poprawna: "C",
+    },
+    {
+        pytanie: "W którym roku upadł Mur Berliński?",
+        odpowiedzi: ["1987", "1989", "1991", "1993"],
+        poprawna: "B",
+    },
+    {
+        pytanie: "Który gaz dominuje w atmosferze Ziemi?",
+        odpowiedzi: ["Tlen", "Azot", "Dwutlenek węgla", "Argon"],
+        poprawna: "B",
+    },
+    {
+        pytanie: "Kto namalował 'Gwiaździstą noc'?",
+        odpowiedzi: ["Vincent van Gogh", "Claude Monet", "Pablo Picasso", "Paul Cézanne"],
+        poprawna: "A",
+    },
+    {
+        pytanie: "Który język ma najwięcej native speakerów?",
+        odpowiedzi: ["Hiszpański", "Mandaryński", "Angielski", "Hindustani"],
+        poprawna: "B",
+    },
+    {
+        pytanie: "Twierdzenie Pitagorasa dotyczy trójkątów…",
+        odpowiedzi: ["Równobocznych", "Prostokątnych", "Równoramiennych", "Dowolnych"],
+        poprawna: "B",
+    },
+];
+
+class Deck {
+    private pool: QA[];
+    private used = 0;
+    constructor(q: QA[]) { this.pool = shuffle([...q]); }
+    draw(): QA {
+        if (this.used >= this.pool.length) {
+            this.used = 0;
+            this.pool = shuffle(this.pool);
+        }
+        return this.pool[this.used++];
+    }
+}
+
+function formatQA(q: QA): string {
+    const lines = [wrap(q.pytanie)];
+    if (q.odpowiedzi) {
+        q.odpowiedzi.forEach((o, i) => lines.push(` ${LITERY[i]}) ${o}`));
+    }
+    return lines.join("\n");
+}
+async function askQA(
+    rl: readline.Interface,
+    q: QA,
+    prefix = ""
+): Promise<boolean> {
+    console.log("\n" + "-".repeat(72));
+    console.log(formatQA(q));
+    const ans = await promptLine(rl, `${prefix}Odpowiedź${q.odpowiedzi ? " (A/B/C/D)" : ""}: `);
+    if (q.odpowiedzi) {
+        const lit = ans.toUpperCase();
+        const ok = LITERY.includes(lit as Litera) && lit === q.poprawna.toUpperCase();
+        console.log(ok ? "✅ Poprawna!" : `❌ Błędna. Poprawna: ${q.poprawna.toUpperCase()}.`);
+        return ok;
+    } else {
+        const ok = normalizeAnswer(ans) === normalizeAnswer(q.poprawna);
+        console.log(ok ? "✅ Poprawna!" : `❌ Błędna. Poprawna: ${q.poprawna}.`);
+        return ok;
+    }
+}
+
+/** ========= ETAP 1 =========
+ * 10 graczy, po 2 pytania, przechodzą ci z ≥1 poprawną.
+ */
+async function etap1(
+    rl: readline.Interface,
+    deck: Deck,
+    players: Player[]
+): Promise<Player[]> {
+    hr("ETAP 1 – Kwalifikacje: każdy z 10 graczy dostaje 2 pytania. Do etapu 2 przechodzą ci, którzy mają ≥1 poprawną odpowiedź.");
+
+    const passed: Player[] = [];
+    for (const p of players) {
+        console.log(`\n▶ ${p.seat}. ${p.name}`);
+        let correct = 0;
+        for (let r = 1; r <= 2; r++) {
+            const q = deck.draw();
+            const ok = await askQA(rl, q, `(${p.name}) `);
+            if (ok) correct++;
+            await pause();
+        }
+        console.log(`Wynik ${p.name}: ${correct}/2 ${correct >= 1 ? "— przechodzi ✅" : "— odpada ❌"}`);
+        if (correct >= 1) passed.push(p);
+    }
+
+    if (passed.length < 3) {
+        console.log("\n⚠️ Mniej niż 3 osoby przeszły. Uzupełniamy do 3 przez dogrywkę (nagła śmierć).");
+        const outsiders = players.filter(x => !passed.includes(x));
+        while (passed.length < 3) {
+            for (const o of outsiders) {
+                const q = deck.draw();
+                console.log(`\nDogrywka — ${o.name}`);
+                const ok = await askQA(rl, q, `(${o.name}) `);
+                if (ok && !passed.includes(o)) {
+                    passed.push(o);
+                    console.log(`➡️ ${o.name} dołącza do etapu 2.`);
+                    if (passed.length >= 3) break;
+                }
+            }
+        }
+    }
+
+    // Przygotuj do Etapu 2: 3 życia, punkty=0, alive=true
+    for (const p of passed) {
+        p.lives = 3;
+        p.score = 0;
+        p.alive = true;
+        p.e3_correctA = 0;
+    }
+
+    console.log("\n✅ Do ETAPU 2 przechodzą:");
+    passed.forEach(p => console.log(`  • [${p.seat}] ${p.name}`));
+    return passed;
+}
+
+/** ========= ETAP 2 =========
+ * Gracz z głosem wybiera INNEGO gracza. Pierwszy wybór: 1–5 → 6–10 (i odwrotnie).
+ * Poprawna → odpowiadający przejmuje głos.
+ * Błędna → -1 życie odpowiadającemu, głos zostaje u wybierającego.
+ * Gramy aż zostanie 3 graczy.
+ */
+function inOppositeHalf(pSeat: number, targetSeat: number): boolean {
+    const a = pSeat <= 5 ? "L" : "R";
+    const b = targetSeat <= 5 ? "L" : "R";
+    return a !== b;
+}
+async function etap2(
+    rl: readline.Interface,
+    deck: Deck,
+    players: Player[]
+): Promise<Player[]> {
+    hr("ETAP 2 – Wybór przeciwnika: każdy ma 3 życia. Zaczyna najniższy numer z uczestników. Gramy aż zostanie 3 graczy.");
+
+    let alive = [...players];
+    alive.sort((a, b) => a.seat - b.seat);
+    let holder = alive[0]; // ma głos
+    let firstPickMustOppositeHalf = true;
+
+    const bySeat = new Map(alive.map(p => [p.seat, p]));
+
+    while (alive.length > 3) {
+        console.log(
+            `\n🎙️ Głos ma [${holder.seat}] ${holder.name}. ` +
+            `Żywi: ${alive.map(p => `[${p.seat}]${p.name}(${showLives(p)})`).join(", ")}`
+        );
+        const targetStr = await promptLine(rl,
+            `Wskaż numer zawodnika do odpowiedzi (nie siebie): `
+        );
+        const targetSeat = parseInt(targetStr, 10);
+        const target = bySeat.get(targetSeat);
+
+        if (!target || !target.alive || target === holder) {
+            console.log("⛔ Błędny wybór. Spróbuj ponownie.");
+            continue;
+        }
+        if (firstPickMustOppositeHalf && !inOppositeHalf(holder.seat, target.seat)) {
+            console.log("⛔ Pierwszy wybór w etapie 2 musi być z przeciwnej połówki (1–5 ↔ 6–10).");
+            continue;
+        }
+
+        // Zadaj pytanie wskazanemu
+        const q = deck.draw();
+        console.log(`\n❓ Pytanie dla [${target.seat}] ${target.name}`);
+        const ok = await askQA(rl, q, `(${target.name}) `);
+
+        if (ok) {
+            console.log(`✅ ${target.name} przejmuje głos.`);
+            holder = target;                 // przejmuje głos
+        } else {
+            target.lives -= 1;
+            console.log(`❤️‍🩹 ${target.name} traci życie → ${showLives(target)}`);
+            if (target.lives <= 0) {
+                target.alive = false;
+                alive = alive.filter(p => p.alive);
+                console.log(`🪩 ${target.name} odpada z etapu 2!`);
+                // głos pozostaje u wybierającego (holder bez zmian)
+            }
+        }
+
+        if (firstPickMustOppositeHalf) firstPickMustOppositeHalf = false;
+        await pause();
+    }
+
+    console.log("\n✅ Do ETAPU 3 (Finał) przechodzą:");
+    alive.forEach(p => console.log(`  • [${p.seat}] ${p.name}`));
+    // reset życia do 3, punkty=0, alive=true, e3_correctA=0
+    for (const p of alive) {
+        p.lives = 3;
+        p.alive = true;
+        p.score = 0;
+        p.e3_correctA = 0;
+    }
+    return alive;
+}
+
+/** ========= ETAP 3 (Finał) =========
+ * Część A: buzzer (kto pierwszy) – poprawna +10, liczymy poprawne A do 3 dla kogokolwiek → część B.
+ * Część B: gracz przy głosie wybiera siebie lub innego.
+ *   • Jeśli wybierze SIEBIE i odpowie dobrze: +20 i zachowuje głos.
+ *   • Jeśli wybierze INNEGO:
+ *       – poprawna: +10 i ten „inny” przejmuje głos,
+ *       – błędna: -1 życie odpowiadającemu, głos pozostaje u wybierającego.
+ * Błędna zawsze -1 życie odpowiadającemu (A i B).
+ * Maks. 40 pytań, koniec też gdy zostanie 1 gracz.
+ */
+async function etap3_final(
+    rl: readline.Interface,
+    deck: Deck,
+    players: Player[]
+): Promise<Player> {
+    hr("ETAP 3 – Finał: Część A (buzzer) potem Część B (wybór). Maksymalnie 40 pytań.");
+
+    let alive = [...players];
+    let asked = 0;
+    let holder: Player | null = null; // pojawi się po pierwszej poprawnej w Części A
+    let inPartB = false;
+
+    const bySeat = new Map(alive.map(p => [p.seat, p]));
+
+    const showState = () => {
+        console.log(
+            "Stan: " + alive
+                .map(p => `[${p.seat}]${p.name} ${showLives(p)} ${p.score}pkt`)
+                .join(" | ")
+        );
+    };
+
+    while (alive.length > 1 && asked < 40) {
+        showState();
+        const q = deck.draw();
+        asked++;
+
+        if (!inPartB) {
+            // Część A – BUZZER
+            console.log(`\n🔔 [${asked}/40] BUZZER — kto pierwszy zgłasza się do odpowiedzi?`);
+            console.log(formatQA(q));
+            const whoStr = await promptLine(rl, "Podaj numer gracza (siedzenie 1–10 wśród finalistów): ");
+            const whoSeat = parseInt(whoStr, 10);
+            const who = bySeat.get(whoSeat);
+            if (!who || !who.alive) {
+                console.log("⛔ Błędny numer — pytanie przepada.");
+                continue;
+            }
+            const ok = await askQA(rl, q, `(${who.name}) `);
+            if (ok) {
+                who.score += 10;
+                who.e3_correctA += 1;
+                holder = who; // od teraz ktoś ma „głos”
+                console.log(`➕ +10 pkt dla ${who.name} (poprawnych w A: ${who.e3_correctA})`);
+                if (who.e3_correctA >= 3) {
+                    inPartB = true;
+                    console.log("➡️ Osiągnięto 3 poprawne w części A — przechodzimy do Części B (wybór).");
+                }
+            } else {
+                who.lives -= 1;
+                console.log(`❤️‍🩹 ${who.name} traci życie → ${showLives(who)}`);
+                if (who.lives <= 0) {
+                    who.alive = false;
+                    alive = alive.filter(p => p.alive);
+                    if (alive.length === 1) break;
+                }
+            }
+        } else {
+            // Część B – WYBÓR
+            if (!holder || !holder.alive) {
+                // jeśli z jakiegoś powodu brak „głosu”, przyznaj go najniższemu seat żywemu
+                holder = alive.slice().sort((a, b) => a.seat - b.seat)[0];
+            }
+            console.log(`\n🎙️ [${asked}/40] Część B — głos ma [${holder.seat}] ${holder.name}`);
+            console.log(formatQA(q));
+            const targetStr = await promptLine(rl, "Wskaż numer zawodnika do odpowiedzi (można siebie): ");
+            const targetSeat = parseInt(targetStr, 10);
+            const target = bySeat.get(targetSeat);
+            if (!target || !target.alive) {
+                console.log("⛔ Błędny wybór — pytanie przepada.");
+                continue;
+            }
+
+            const ok = await askQA(rl, q, `(${target.name}) `);
+            if (target === holder) {
+                // wybrał siebie
+                if (ok) {
+                    holder.score += 20;
+                    console.log(`➕ +20 pkt dla ${holder.name}. Głos pozostaje.`);
+                } else {
+                    holder.lives -= 1;
+                    console.log(`❤️‍🩹 ${holder.name} traci życie → ${showLives(holder)}`);
+                    if (holder.lives <= 0) {
+                        holder.alive = false;
+                        alive = alive.filter(p => p.alive);
+                        if (alive.length === 1) break;
+                        // głos przechodzi na najniższy seat żywy
+                        holder = alive.slice().sort((a, b) => a.seat - b.seat)[0];
+                    }
+                }
+            } else {
+                // wybrał innego
+                if (ok) {
+                    target.score += 10;
+                    console.log(`➕ +10 pkt dla ${target.name}. Przejmuje głos.`);
+                    holder = target; // przejmuje głos
+                } else {
+                    target.lives -= 1;
+                    console.log(`❤️‍🩹 ${target.name} traci życie → ${showLives(target)}`);
+                    if (target.lives <= 0) {
+                        target.alive = false;
+                        alive = alive.filter(p => p.alive);
+                        if (alive.length === 1) break;
+                        // głos zostaje u dotychczasowego holdera
+                    }
+                }
+            }
+        }
+        await pause();
+    }
+
+    showState();
+
+    // Rozstrzygnięcie: 1 żywy albo po 40 pytaniach — najwyższy wynik
+    let champion: Player;
+    if (alive.length === 1) {
+        champion = alive[0];
+        console.log(`\n🏁 Zwycięzca przez eliminację: ${champion.name} (${champion.score} pkt)`);
+    } else {
+        const top = players.slice().sort((a, b) => b.score - a.score);
+        const bestScore = top[0].score;
+        const tied = top.filter(p => p.score === bestScore && p.alive);
+        if (tied.length === 1) {
+            champion = tied[0];
+            console.log(`\n🏁 Zwycięzca punktowy: ${champion.name} (${champion.score} pkt)`);
+        } else {
+            // Dogrywka na buzzer do pierwszej przewagi
+            console.log("\n⚔️ Dogrywka na buzzer pomiędzy:");
+            tied.forEach(p => console.log(`  • ${p.name}`));
+            while (true) {
+                const q = deck.draw();
+                console.log("\nDOGRYWKA — BUZZER");
+                console.log(formatQA(q));
+                const whoStr = await promptLine(rl, "Kto zgłasza się pierwszy? Podaj numer siedzenia: ");
+                const whoSeat = parseInt(whoStr, 10);
+                const who = tied.find(p => p.seat === whoSeat && p.alive);
+                if (!who) { console.log("⛔ Błędny numer."); continue; }
+                const ok = await askQA(rl, q, `(${who.name}) `);
+                if (ok) { champion = who; break; }
+            }
+            console.log(`\n🏁 Zwycięzca po dogrywce: ${champion!.name} (${champion!.score} pkt)`);
+        }
+    }
+    return champion!;
+}
+
+/** ========= MAIN ========= */
+async function main() {
+    const rl = readline.createInterface({ input, output });
+    try {
+        console.log("\nWitaj w grze: JEDEN Z DZIESIĘCIU (konsola, TypeScript)\n");
+
+        const players: Player[] = [];
+        for (let i = 1; i <= 10; i++) {
+            const name = (await promptLine(rl, `Podaj imię gracza ${i} (Enter = Gracz${i}): `)) || `Gracz${i}`;
+            players.push({ seat: i, name, lives: 0, score: 0, alive: true, e3_correctA: 0 });
+        }
+
+        const deck = new Deck(PYTANIA);
+
+        // ETAP 1
+        const p2 = await etap1(rl, deck, players);
+
+        // ETAP 2
+        const p3 = await etap2(rl, deck, p2);
+
+        // ETAP 3 (Finał)
+        const champion = await etap3_final(rl, deck, p3);
+
+        console.log("\n" + "=".repeat(72));
+        console.log(`🎉 MISTRZ ODCINKA: ${champion.name}! Wynik: ${champion.score} pkt`);
+        console.log("=" .repeat(72) + "\n");
+    } finally {
+        // @ts-ignore
+        rl.close();
+    }
+}
+
+main().catch(e => {
+    console.error("Błąd:", e);
+});
+
